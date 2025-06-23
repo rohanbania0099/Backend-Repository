@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -19,7 +18,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://rohanbania:rohanbania009%40009@movie.3luxgqr.mongodb.net/?retryWrites=true&w=majority')
     .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.error('MongoDB connection error:', err));
 
@@ -60,7 +59,7 @@ const authenticateAdmin = async (req, res, next) => {
             return res.status(401).json({ error: 'Authentication required' });
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
         const admin = await Admin.findById(decoded.adminId);
         
         if (!admin) {
@@ -95,7 +94,7 @@ app.post('/api/admin/login', async (req, res) => {
 
         const token = jwt.sign(
             { adminId: admin._id },
-            process.env.JWT_SECRET,
+            process.env.JWT_SECRET || 'your-secret-key',
             { expiresIn: '24h' }
         );
 
@@ -110,41 +109,6 @@ app.post('/api/admin/login', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ error: 'Login failed' });
-    }
-});
-
-app.post('/api/admin/register', async (req, res) => {
-    try {
-        const { username, password, email } = req.body;
-        
-        // Check if admin already exists
-        const existingAdmin = await Admin.findOne({ 
-            $or: [{ username }, { email }] 
-        });
-        
-        if (existingAdmin) {
-            return res.status(400).json({ 
-                error: 'Username or email already exists' 
-            });
-        }
-
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        // Create new admin
-        const admin = new Admin({
-            username,
-            password: hashedPassword,
-            email
-        });
-
-        await admin.save();
-
-        res.status(201).json({ 
-            message: 'Admin account created successfully' 
-        });
-    } catch (error) {
-        res.status(500).json({ error: 'Registration failed' });
     }
 });
 
@@ -169,6 +133,16 @@ app.get('/api/admin/dashboard', authenticateAdmin, async (req, res) => {
 });
 
 // Movie Routes
+app.post('/api/movies', authenticateAdmin, async (req, res) => {
+    try {
+        const movie = new Movie(req.body);
+        await movie.save();
+        res.status(201).json(movie);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to add movie' });
+    }
+});
+
 app.get('/api/movies', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -189,82 +163,6 @@ app.get('/api/movies', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch movies' });
-    }
-});
-
-app.get('/api/movies/search', async (req, res) => {
-    try {
-        const { query } = req.query;
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 24;
-        const skip = (page - 1) * limit;
-
-        const searchRegex = new RegExp(query, 'i');
-        const totalMovies = await Movie.countDocuments({
-            $or: [
-                { title: searchRegex },
-                { genres: searchRegex }
-            ]
-        });
-
-        const movies = await Movie.find({
-            $or: [
-                { title: searchRegex },
-                { genres: searchRegex }
-            ]
-        })
-            .sort({ pinned: -1, createdAt: -1 })
-            .skip(skip)
-            .limit(limit);
-
-        res.json({
-            movies,
-            currentPage: page,
-            totalPages: Math.ceil(totalMovies / limit),
-            totalMovies
-        });
-    } catch (error) {
-        res.status(500).json({ error: 'Search failed' });
-    }
-});
-
-app.get('/api/movies/genre/:genres', async (req, res) => {
-    try {
-        const genres = req.params.genres.split(',');
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 24;
-        const skip = (page - 1) * limit;
-
-        const totalMovies = await Movie.countDocuments({
-            genres: { $in: genres }
-        });
-
-        const movies = await Movie.find({
-            genres: { $in: genres }
-        })
-            .sort({ pinned: -1, createdAt: -1 })
-            .skip(skip)
-            .limit(limit);
-
-        res.json({
-            movies,
-            currentPage: page,
-            totalPages: Math.ceil(totalMovies / limit),
-            totalMovies
-        });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch movies by genre' });
-    }
-});
-
-// Protected Movie Management Routes
-app.post('/api/movies', authenticateAdmin, async (req, res) => {
-    try {
-        const movie = new Movie(req.body);
-        await movie.save();
-        res.status(201).json(movie);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to add movie' });
     }
 });
 
@@ -296,20 +194,29 @@ app.delete('/api/movies/:id', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Serve admin page
-app.get('/admin', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+// Temporary route to create admin (DELETE AFTER FIRST USE)
+app.post('/api/admin/setup', async (req, res) => {
+    try {
+        const adminExists = await Admin.findOne({ username: 'admin' });
+        if (adminExists) {
+            return res.status(400).json({ error: 'Admin already exists' });
+        }
+
+        const hashedPassword = await bcrypt.hash('admin123', 10);
+        const admin = new Admin({
+            username: 'admin',
+            password: hashedPassword,
+            email: 'admin@example.com'
+        });
+
+        await admin.save();
+        res.status(201).json({ message: 'Admin created successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to create admin' });
+    }
 });
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-    app.use(express.static('public'));
-    app.get('*', (req, res) => {
-        res.sendFile(path.resolve(__dirname, 'public', 'index.html'));
-    });
-}
-
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 }); 
